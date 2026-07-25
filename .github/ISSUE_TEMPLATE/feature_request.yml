@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a focused improvement to NoYap
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Which user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: smallest
+    attributes:
+      label: What is the smallest useful solution?
+    validations:
+      required: true
+  - type: textarea
+    id: overhead
+    attributes:
+      label: How will this avoid adding workflow overhead?
+    validations:
+      required: true
