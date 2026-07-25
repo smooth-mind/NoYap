@@ -71,7 +71,7 @@ After this repository is published, the easiest method will be GitHub's **Use th
 You can also clone it:
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/NoYap.git my-project
+git clone https://github.com/smooth-mind/NoYap.git my-project
 cd my-project
 ```
 
