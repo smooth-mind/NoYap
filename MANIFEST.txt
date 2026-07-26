@@ -45,3 +45,6 @@ noyap/templates/PHASE.template.md
 noyap/templates/TASK_PROMPT.template.md
 scripts/noyap.py
 tests/test_noyap.py
+noyap/changes/proposed/.gitkeep
+noyap/changes/approved/.gitkeep
+noyap/changes/completed/.gitkeep
