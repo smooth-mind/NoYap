@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,12 @@ REQUIRED_FILES = (
     "noyap/PHASES.md",
     "noyap/PROJECT_STATE.md",
     "noyap/MEMORY.md",
+)
+
+REQUIRED_DIRECTORIES = (
+    "noyap/changes/proposed",
+    "noyap/changes/approved",
+    "noyap/changes/completed",
 )
 
 GOVERNANCE_FILES = (
@@ -57,10 +64,41 @@ VALID_STATUSES = {
     "not-applicable",
 }
 
+VALID_PHASE_STATUSES = {
+    "planned",
+    "active",
+    "blocked",
+    "completed",
+    "superseded",
+}
+
 FRONT_MATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 NEXT_PROMPT_PATTERN = re.compile(
     r"<!-- NEXT_PROMPT_START -->\s*(.*?)\s*<!-- NEXT_PROMPT_END -->",
     re.DOTALL,
+)
+PHASE_HEADING_PATTERN = re.compile(
+    r"^##\s+Phase\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s*:",
+    re.IGNORECASE,
+)
+PHASE_STATUS_PATTERN = re.compile(
+    r"^-\s+\*\*Status:\*\*\s+(.+?)\s*$",
+    re.IGNORECASE,
+)
+CURRENT_PROGRESS_PATTERN = re.compile(
+    r"^##\s+Current progress\s*$\n(.*?)(?=^##\s+|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+DUPLICATED_PROGRESS_FIELDS = (
+    "current phase",
+    "current task",
+    "last completed task",
+    "implementation permitted",
+    "next permitted action",
+    "blockers",
+    "human approval required before execution",
 )
 
 
@@ -84,6 +122,78 @@ def parse_front_matter(text: str) -> dict[str, str]:
     return result
 
 
+def is_valid_iso_date(value: str | None) -> bool:
+    """Return True only for a real calendar date in exact YYYY-MM-DD form."""
+    if not value or not ISO_DATE_PATTERN.fullmatch(value):
+        return False
+
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+
+    return True
+
+
+def parse_phases(text: str) -> tuple[dict[str, str], list[str]]:
+    """Parse phase IDs and statuses from PHASES.md headings and status lines."""
+    phases: dict[str, str] = {}
+    errors: list[str] = []
+    current_phase_id: str | None = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+
+        heading_match = PHASE_HEADING_PATTERN.match(line)
+        if heading_match:
+            phase_token = heading_match.group(1).lower()
+            current_phase_id = f"phase-{phase_token}"
+
+            if current_phase_id in phases:
+                errors.append(
+                    f"Duplicate phase identifier in PHASES.md: {current_phase_id}"
+                )
+            else:
+                phases[current_phase_id] = ""
+            continue
+
+        if current_phase_id:
+            status_match = PHASE_STATUS_PATTERN.match(line)
+            if status_match and not phases[current_phase_id]:
+                phases[current_phase_id] = status_match.group(1).strip().lower()
+
+    if not phases:
+        errors.append("PHASES.md must define at least one phase")
+        return phases, errors
+
+    for phase_id, status in phases.items():
+        if not status:
+            errors.append(f"Phase lacks a Status field: {phase_id}")
+        elif status not in VALID_PHASE_STATUSES:
+            errors.append(f"Invalid phase status '{status}' for {phase_id}")
+
+    return phases, errors
+
+
+def duplicated_prompt_state_fields(prompts: str) -> list[str]:
+    """Find canonical project-state fields duplicated in Current progress."""
+    match = CURRENT_PROGRESS_PATTERN.search(prompts)
+    if not match:
+        return []
+
+    section = match.group(1)
+    found: list[str] = []
+    for field in DUPLICATED_PROGRESS_FIELDS:
+        pattern = re.compile(
+            rf"^\s*[-*]\s+(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*:",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        if pattern.search(section):
+            found.append(field)
+
+    return found
+
+
 def validation_errors() -> list[str]:
     errors: list[str] = []
 
@@ -94,6 +204,11 @@ def validation_errors() -> list[str]:
             continue
         if not path.read_text(encoding="utf-8").strip():
             errors.append(f"Required file is empty: {relative_path}")
+
+    for relative_path in REQUIRED_DIRECTORIES:
+        path = ROOT / relative_path
+        if not path.is_dir():
+            errors.append(f"Missing required directory: {relative_path}")
 
     governance_metadata: dict[str, dict[str, str]] = {}
     for relative_path in GOVERNANCE_FILES:
@@ -111,6 +226,20 @@ def validation_errors() -> list[str]:
         elif status not in VALID_STATUSES:
             errors.append(f"Invalid status '{status}' in {relative_path}")
 
+    phases: dict[str, str] = {}
+    phases_path = ROOT / "noyap/PHASES.md"
+    if phases_path.is_file():
+        phases, phase_errors = parse_phases(
+            phases_path.read_text(encoding="utf-8")
+        )
+        errors.extend(phase_errors)
+
+        active_phases = [
+            phase_id for phase_id, status in phases.items() if status == "active"
+        ]
+        if len(active_phases) != 1:
+            errors.append("PHASES.md must contain exactly one Active phase")
+
     state_path = ROOT / "noyap/PROJECT_STATE.md"
     if state_path.is_file():
         metadata = governance_metadata.get("noyap/PROJECT_STATE.md", {})
@@ -121,6 +250,7 @@ def validation_errors() -> list[str]:
             "implementation_permitted",
             "current_phase",
             "current_task",
+            "last_updated",
         ):
             if not metadata.get(field):
                 errors.append(f"PROJECT_STATE.md is missing front-matter field: {field}")
@@ -134,9 +264,25 @@ def validation_errors() -> list[str]:
                 "PROJECT_STATE.md implementation_permitted must be true or false"
             )
 
+        last_updated = metadata.get("last_updated")
+        if last_updated and not is_valid_iso_date(last_updated):
+            errors.append(
+                "PROJECT_STATE.md last_updated must be a real YYYY-MM-DD date"
+            )
+
         baseline_status = metadata.get("baseline_status")
         implementation_permitted = metadata.get("implementation_permitted")
         current_phase = metadata.get("current_phase", "")
+
+        if current_phase and phases:
+            if current_phase not in phases:
+                errors.append(
+                    f"current_phase '{current_phase}' does not exist in PHASES.md"
+                )
+            elif phases[current_phase] != "active":
+                errors.append(
+                    f"current_phase '{current_phase}' is not Active in PHASES.md"
+                )
 
         if implementation_permitted == "true" and baseline_status != "approved":
             errors.append(
@@ -165,9 +311,16 @@ def validation_errors() -> list[str]:
                 document = governance_metadata.get(relative_path, {})
                 if document.get("status") == "approved":
                     if document.get("approved_by") in {None, "", "null"}:
-                        errors.append(f"Approved document lacks approved_by: {relative_path}")
-                    if document.get("approved_on") in {None, "", "null"}:
-                        errors.append(f"Approved document lacks approved_on: {relative_path}")
+                        errors.append(
+                            f"Approved document lacks approved_by: {relative_path}"
+                        )
+
+                    approved_on = document.get("approved_on")
+                    if not is_valid_iso_date(approved_on):
+                        errors.append(
+                            "Approved document has an invalid approved_on date: "
+                            f"{relative_path}"
+                        )
 
     prompts_path = ROOT / "PROMPTS.md"
     if prompts_path.is_file():
@@ -179,6 +332,13 @@ def validation_errors() -> list[str]:
             )
         elif not matches[0].strip():
             errors.append("The NEXT PROMPT block is empty")
+
+        duplicated_fields = duplicated_prompt_state_fields(prompts)
+        for field in duplicated_fields:
+            errors.append(
+                "PROMPTS.md duplicates canonical PROJECT_STATE.md field in "
+                f"Current progress: {field}"
+            )
 
     memory_path = ROOT / "noyap/MEMORY.md"
     if memory_path.is_file():
