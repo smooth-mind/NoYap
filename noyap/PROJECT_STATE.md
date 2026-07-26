@@ -1,7 +1,7 @@
 ---
 document: project-state
 status: active
-noyap_version: 0.1.0
+noyap_version: 0.1.1
 mode: guided
 baseline_status: draft
 implementation_permitted: false
