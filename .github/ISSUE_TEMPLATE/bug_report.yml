@@ -26,4 +26,4 @@ body:
     id: version
     attributes:
       label: NoYap version
-      placeholder: 0.1.0
+      placeholder: 0.1.1

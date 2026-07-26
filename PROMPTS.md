@@ -4,7 +4,7 @@ document: prompts
 status: active
 mode: bootstrap
 last_updated: 2026-07-26
-------------------------
+---
 
 # NoYap Project Prompts
 

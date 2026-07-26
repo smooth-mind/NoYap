@@ -72,6 +72,12 @@ VALID_PHASE_STATUSES = {
     "superseded",
 }
 
+VALID_BASELINE_STATUSES = {
+    "draft",
+    "under-review",
+    "approved",
+}
+
 FRONT_MATTER_PATTERN = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 NEXT_PROMPT_PATTERN = re.compile(
     r"<!-- NEXT_PROMPT_START -->\s*(.*?)\s*<!-- NEXT_PROMPT_END -->",
@@ -86,7 +92,7 @@ PHASE_STATUS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 CURRENT_PROGRESS_PATTERN = re.compile(
-    r"^##\s+Current progress\s*$\n(.*?)(?=^##\s+|\Z)",
+    r"^##\s+Current (?:progress|project state)\s*$\n(.*?)(?=^##\s+|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -264,6 +270,12 @@ def validation_errors() -> list[str]:
                 "PROJECT_STATE.md implementation_permitted must be true or false"
             )
 
+        if metadata.get("baseline_status") not in VALID_BASELINE_STATUSES:
+            errors.append(
+                "PROJECT_STATE.md baseline_status must be draft, "
+                "under-review, or approved"
+            )
+
         last_updated = metadata.get("last_updated")
         if last_updated and not is_valid_iso_date(last_updated):
             errors.append(
@@ -325,6 +337,30 @@ def validation_errors() -> list[str]:
     prompts_path = ROOT / "PROMPTS.md"
     if prompts_path.is_file():
         prompts = prompts_path.read_text(encoding="utf-8")
+        prompts_metadata = parse_front_matter(prompts)
+        if not prompts_metadata:
+            errors.append("Missing YAML front matter: PROMPTS.md")
+        else:
+            for field in ("document", "status", "mode", "last_updated"):
+                if not prompts_metadata.get(field):
+                    errors.append(
+                        f"PROMPTS.md is missing front-matter field: {field}"
+                    )
+
+            prompts_status = prompts_metadata.get("status")
+            if prompts_status and prompts_status not in VALID_STATUSES:
+                errors.append(
+                    f"Invalid status '{prompts_status}' in PROMPTS.md"
+                )
+
+            prompts_last_updated = prompts_metadata.get("last_updated")
+            if prompts_last_updated and not is_valid_iso_date(
+                prompts_last_updated
+            ):
+                errors.append(
+                    "PROMPTS.md last_updated must be a real YYYY-MM-DD date"
+                )
+
         matches = NEXT_PROMPT_PATTERN.findall(prompts)
         if len(matches) != 1:
             errors.append(

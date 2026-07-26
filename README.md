@@ -283,7 +283,7 @@ Agent products evolve. Keep adapters short and verify tool-specific discovery be
 
 ## Project status
 
-This archive is **NoYap v0.1.0**, an initial working template and validator. The next sensible milestone is to test it on one small website and one existing codebase, then measure:
+This archive is **NoYap v0.1.1**, an initial working template and validator. The next sensible milestone is to test it on one small website and one existing codebase, then measure:
 
 - unrequested changes;
 - files and lines changed per task;
